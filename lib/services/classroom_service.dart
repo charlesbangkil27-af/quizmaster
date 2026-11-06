@@ -29,43 +29,43 @@ Future<String> createClass(String name, String section) async {
 
   for (var i = 0; i < 8; i++) {
     final code = _code();
+
     final classRef = _db.collection('classes').doc();
     final codeRef = _db.collection('classCodes').doc(code);
 
-    var collision = false;
+    final existing = await codeRef.get();
+    if (existing.exists) continue;
 
-    await _db.runTransaction((transaction) async {
-      final existing = await transaction.get(codeRef);
+    final batch = _db.batch();
 
-      if (existing.exists) {
-        collision = true;
-        return;
-      }
-
-      transaction.set(classRef, {
-        'name': n,
-        'section': s,
-        'teacherId': uid,
-        'teacherName': p.data()?['displayName'] ?? 'Teacher',
-        'joinCode': code,
-        'createdAt': FieldValue.serverTimestamp(),
-        'isActive': true,
-      });
-
-      transaction.set(codeRef, {
-        'classId': classRef.id,
-        'teacherId': uid,
-        'joinCode': code,
-        'isActive': true,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+    batch.set(classRef, {
+      'name': n,
+      'section': s,
+      'teacherId': uid,
+      'teacherName': p.data()?['displayName'] ?? 'Teacher',
+      'joinCode': code,
+      'createdAt': FieldValue.serverTimestamp(),
+      'isActive': true,
     });
 
-    if (!collision) return code;
+    batch.set(codeRef, {
+      'classId': classRef.id,
+      'className': n,
+      'section': s,
+      'teacherId': uid,
+      'joinCode': code,
+      'isActive': true,
+    });
+
+    await batch.commit();
+
+    return code;
   }
 
   throw StateError('Could not generate a unique class code.');
 }
+
+
 
 Future<void> joinClass(String inputCode) async {
   final code = inputCode.trim().toUpperCase();
@@ -82,30 +82,37 @@ Future<void> joinClass(String inputCode) async {
     throw StateError('An active student account is required.');
   }
 
-  // Look up only the exact class code.
+  // Look up the class using its code document.
   final codeDoc = await _db.collection('classCodes').doc(code).get();
 
-  if (!codeDoc.exists || codeDoc.data()?['isActive'] != true) {
-    throw StateError('Invalid or inactive class code.');
+  if (!codeDoc.exists) {
+    throw StateError('Invalid class code.');
   }
 
-  final data = codeDoc.data()!;
-  final classId = data['classId'] as String;
-  final teacherId = data['teacherId'] as String;
+  final d = codeDoc.data()!;
 
-  final enrollmentRef = _db
+  if (d['isActive'] != true) {
+    throw StateError('This class is inactive.');
+  }
+
+  final classId = d['classId'] as String;
+  final teacherId = d['teacherId'] as String;
+
+  final ref = _db
       .collection('enrollments')
       .doc('${classId}_$uid');
 
   await _db.runTransaction((transaction) async {
-    final existing = await transaction.get(enrollmentRef);
+    final old = await transaction.get(ref);
 
-    if (existing.exists) {
+    if (old.exists) {
       throw StateError('You already joined this class.');
     }
 
-    transaction.set(enrollmentRef, {
+    transaction.set(ref, {
       'classId': classId,
+      'className': d['className'],
+      'section': d['section'],
       'studentId': uid,
       'teacherId': teacherId,
       'joinCode': code,
@@ -113,6 +120,7 @@ Future<void> joinClass(String inputCode) async {
     });
   });
 }
+
 
   Stream<QuerySnapshot<Map<String,dynamic>>> teacherQuizzesForClass(String id)=>_db.collection('quizzes').where('classId',isEqualTo:id).where('teacherId',isEqualTo:uid).orderBy('createdAt',descending:true).snapshots();
   Stream<QuerySnapshot<Map<String,dynamic>>> studentQuizzesForClass(String id)=>_db.collection('quizzes').where('classId',isEqualTo:id).where('isPublished',isEqualTo:true).snapshots();

@@ -59,23 +59,36 @@ service cloud.firestore {
       allow delete: if activeTeacher() && resource.data.teacherId == request.auth.uid;
     }
 
-    match /classCodes/{code} {
-      // A signed-in user may fetch one known code; listing the collection is forbidden.
-      allow get: if signedIn();
-      allow list: if false;
-      allow create: if activeTeacher()
-        && request.resource.data.teacherId == request.auth.uid
-        && request.resource.data.joinCode == code
-        && code.matches('^[A-HJ-NP-Z2-9]{6}$')
-        && request.resource.data.isActive == true
-        && request.resource.data.classId is string
-        && getAfter(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.teacherId == request.auth.uid;
-      allow update, delete: if false;
-    }
+   
+match /classCodes/{code} {
+  allow get: if signedIn() && resource.data.isActive == true;
+  allow list: if false;
+
+  allow create: if activeTeacher()
+    && request.resource.data.teacherId == request.auth.uid
+    && request.resource.data.joinCode == code
+    && code.matches('^[A-HJ-NP-Z2-9]{6}$')
+    && request.resource.data.isActive == true
+    && request.resource.data.classId is string
+    && getAfter(
+      /databases/$(database)/documents/classes/$(request.resource.data.classId)
+    ).data.teacherId == request.auth.uid;
+
+  allow update, delete: if false;
+}
+
 
     match /enrollments/{enrollmentId} {
-      allow read: if signedIn()
-        && (resource.data.studentId == request.auth.uid || resource.data.teacherId == request.auth.uid);
+allow get: if signedIn() && (
+  enrollmentId.matches('.*_' + request.auth.uid + '$')
+  || resource.data.studentId == request.auth.uid
+  || resource.data.teacherId == request.auth.uid
+);
+
+allow list: if signedIn() && (
+  resource.data.studentId == request.auth.uid
+  || resource.data.teacherId == request.auth.uid
+);
       allow create: if activeStudent()
         && request.resource.data.studentId == request.auth.uid
         && request.resource.data.classId is string
