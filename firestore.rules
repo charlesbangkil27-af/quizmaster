@@ -61,7 +61,7 @@ service cloud.firestore {
 
    
 match /classCodes/{code} {
-  allow get: if signedIn() && resource.data.isActive == true;
+allow get: if signedIn();
   allow list: if false;
 
   allow create: if activeTeacher()
