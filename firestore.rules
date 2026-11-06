@@ -1,0 +1,212 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function activeStudent() {
+      return signedIn()
+        && userProfile().role == 'student'
+        && userProfile().isActive == true;
+    }
+    function activeTeacher() {
+      return signedIn()
+        && userProfile().role == 'teacher'
+        && userProfile().isActive == true;
+    }
+    function enrolled(classId) {
+      return activeStudent()
+        && exists(/databases/$(database)/documents/enrollments/$(classId + '_' + request.auth.uid));
+    }
+    function ownsClass(classId) {
+      return activeTeacher()
+        && get(/databases/$(database)/documents/classes/$(classId)).data.teacherId == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['displayName', 'email', 'role', 'isActive', 'approvalStatus', 'createdAt'])
+        && request.resource.data.displayName is string
+        && request.resource.data.email is string
+        && request.resource.data.role in ['student', 'teacher']
+        && request.resource.data.isActive == true
+        && request.resource.data.approvalStatus == 'approved';
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName']);
+      allow delete: if false;
+    }
+
+    match /classes/{classId} {
+      allow read: if signedIn()
+        && (resource.data.teacherId == request.auth.uid || enrolled(classId));
+      allow create: if activeTeacher()
+        && request.resource.data.teacherId == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.section is string
+        && request.resource.data.joinCode is string
+        && request.resource.data.joinCode.matches('^[A-HJ-NP-Z2-9]{6}$')
+        && request.resource.data.isActive == true;
+      allow update: if activeTeacher()
+        && resource.data.teacherId == request.auth.uid
+        && request.resource.data.teacherId == resource.data.teacherId;
+      allow delete: if activeTeacher() && resource.data.teacherId == request.auth.uid;
+    }
+
+   
+match /classCodes/{code} {
+allow get: if signedIn();
+  allow list: if false;
+
+  allow create: if activeTeacher()
+    && request.resource.data.teacherId == request.auth.uid
+    && request.resource.data.joinCode == code
+    && code.matches('^[A-HJ-NP-Z2-9]{6}$')
+    && request.resource.data.isActive == true
+    && request.resource.data.classId is string
+    && getAfter(
+      /databases/$(database)/documents/classes/$(request.resource.data.classId)
+    ).data.teacherId == request.auth.uid;
+
+  allow update, delete: if false;
+}
+
+
+    match /enrollments/{enrollmentId} {
+allow get: if signedIn() && (
+  enrollmentId.matches('.*_' + request.auth.uid + '$')
+  || resource.data.studentId == request.auth.uid
+  || resource.data.teacherId == request.auth.uid
+);
+
+allow list: if signedIn() && (
+  resource.data.studentId == request.auth.uid
+  || resource.data.teacherId == request.auth.uid
+);
+      allow create: if activeStudent()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.classId is string
+        && enrollmentId == request.resource.data.classId + '_' + request.auth.uid
+        && exists(/databases/$(database)/documents/classes/$(request.resource.data.classId))
+        && get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.isActive == true
+        && get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.joinCode == request.resource.data.joinCode
+        && get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.teacherId == request.resource.data.teacherId;
+      allow update, delete: if false;
+    }
+
+    match /quizzes/{quizId} {
+      allow read: if signedIn()
+        && ((resource.data.teacherId == request.auth.uid && activeTeacher())
+          || (resource.data.isPublished == true && enrolled(resource.data.classId)));
+      allow create: if activeTeacher()
+        && request.resource.data.teacherId == request.auth.uid
+        && request.resource.data.classId is string
+        && ownsClass(request.resource.data.classId);
+      allow update: if activeTeacher()
+        && resource.data.teacherId == request.auth.uid
+        && request.resource.data.teacherId == resource.data.teacherId
+        && request.resource.data.classId == resource.data.classId;
+      allow delete: if activeTeacher() && resource.data.teacherId == request.auth.uid;
+
+      match /questions/{questionId} {
+        function parentQuiz() {
+          return get(/databases/$(database)/documents/quizzes/$(quizId)).data;
+        }
+        allow read: if signedIn()
+          && ((parentQuiz().teacherId == request.auth.uid && activeTeacher())
+            || (parentQuiz().isPublished == true && enrolled(parentQuiz().classId)));
+        allow create: if activeTeacher()
+          && request.resource.data.teacherId == request.auth.uid
+          && request.resource.data.classId == getAfter(/databases/$(database)/documents/quizzes/$(quizId)).data.classId
+          && getAfter(/databases/$(database)/documents/quizzes/$(quizId)).data.teacherId == request.auth.uid
+          && request.resource.data.timerSeconds is int
+          && request.resource.data.timerSeconds >= 5
+          && request.resource.data.timerSeconds <= 600;
+        allow update, delete: if activeTeacher() && parentQuiz().teacherId == request.auth.uid;
+      }
+    }
+
+    // Practice mode: answer keys are readable by enrolled students for client-side grading.
+    // Do not use this design for secure/high-stakes examinations.
+    match /answerKeys/{keyId} {
+      allow get: if signedIn() && resource.data.classId is string
+        && ((activeTeacher() && ownsClass(resource.data.classId)) || enrolled(resource.data.classId));
+      allow list: if false;
+      allow create: if activeTeacher()
+        && request.resource.data.classId is string
+        && ownsClass(request.resource.data.classId);
+      allow update, delete: if activeTeacher() && ownsClass(resource.data.classId);
+    }
+
+    match /quizAttempts/{attemptId} {
+    allow read: if signedIn()
+  && (resource.data.uid == request.auth.uid
+    || attemptId.matches('^' + request.auth.uid + '_.*')
+    || (activeTeacher() && (resource.data.teacherId == request.auth.uid
+      || ownsClass(resource.data.classId))));
+      allow create: if activeStudent()
+      && attemptId == request.auth.uid + '_' + request.resource.data.quizId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'inProgress'
+        && request.resource.data.teacherId is string
+        && request.resource.data.teacherId == get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.teacherId
+        && enrolled(request.resource.data.classId);
+      allow update: if activeStudent()
+        && resource.data.uid == request.auth.uid
+        && resource.data.status == 'inProgress'
+        && request.resource.data.status == 'submitted'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'answers', 'score', 'totalPoints', 'percentage', 'submittedAt', 'wasLate']);
+      allow delete: if false;
+    }
+
+
+    match /notifications/{notificationId} {
+      allow get, list: if signedIn()
+        && resource.data.recipientId == request.auth.uid;
+
+      allow create: if signedIn() && (
+        (activeTeacher()
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.type in ['quiz', 'announcement']
+          && request.resource.data.classId is string
+          && ownsClass(request.resource.data.classId)
+          && exists(/databases/$(database)/documents/enrollments/$(request.resource.data.classId + '_' + request.resource.data.recipientId)))
+        ||
+        (activeStudent()
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.studentId == request.auth.uid
+          && request.resource.data.type == 'student_joined'
+          && request.resource.data.classId is string
+          && enrolled(request.resource.data.classId)
+          && get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.teacherId
+            == request.resource.data.recipientId)
+      );
+
+      allow update: if signedIn()
+        && resource.data.recipientId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead'])
+        && request.resource.data.isRead is bool;
+      allow delete: if false;
+    }
+
+    match /leaderboards/{classId}/entries/{studentId} {
+      allow get, list: if signedIn()
+        && (enrolled(classId) || ownsClass(classId));
+      // Practice rankings are client-calculated and are not suitable for official grading.
+      allow create, update: if activeStudent()
+        && studentId == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && enrolled(classId)
+        && request.resource.data.averagePercentage is number
+        && request.resource.data.averagePercentage >= 0
+        && request.resource.data.averagePercentage <= 100;
+      allow delete: if false;
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "343091314144",
+    "project_id": "quizmaster-capstone",
+    "storage_bucket": "quizmaster-capstone.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:343091314144:android:5ea8993e13685ddfd23f85",
+        "android_client_info": {
+          "package_name": "com.example.quizmaster_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAleNWSt2p8lv4uMIHc-BzZbgPCOZ3Z65U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
