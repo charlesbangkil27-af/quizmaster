@@ -1,0 +1,32 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "quizmaster-capstone",
+          "appId": "1:343091314144:android:5ea8993e13685ddfd23f85",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "quizmaster-capstone",
+          "configurations": {
+            "android": "1:343091314144:android:5ea8993e13685ddfd23f85",
+            "ios": "1:343091314144:ios:c55dd8487f18140ed23f85",
+            "macos": "1:343091314144:ios:c55dd8487f18140ed23f85",
+            "web": "1:343091314144:web:0b41139517a0513ad23f85",
+            "windows": "1:343091314144:web:e94c90f2804a3cc4d23f85"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

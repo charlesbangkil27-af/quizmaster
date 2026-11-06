@@ -1,0 +1,24 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Firebase / Node
+.firebase/
+functions/node_modules/
+functions/.runtimeconfig.json
+functions/*.log
+
+# OS
+.DS_Store
+Thumbs.db
