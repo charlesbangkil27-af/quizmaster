@@ -1,8 +1,20 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'firebase_options.dart';
 import 'screens/auth_gate.dart';
+
+const bool useFirebaseEmulator = bool.fromEnvironment(
+  'USE_FIREBASE_EMULATOR',
+  defaultValue: false,
+);
+const String firebaseEmulatorHost = String.fromEnvironment(
+  'FIREBASE_EMULATOR_HOST',
+  defaultValue: '127.0.0.1',
+);
 
 const qmNavy = Color(0xFF101A3A);
 const qmBlue = Color(0xFF4F6BFF);
@@ -57,6 +69,21 @@ class QuizMasterLogo extends StatelessWidget {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  if (useFirebaseEmulator) {
+    final host = kIsWeb ? '127.0.0.1' : firebaseEmulatorHost;
+    await FirebaseAuth.instance.useAuthEmulator(
+      host,
+      9099,
+      automaticHostMapping: false,
+    );
+    FirebaseFirestore.instance.useFirestoreEmulator(
+      host,
+      8080,
+      automaticHostMapping: false,
+    );
+    debugPrint('QuizMaster connected to Firebase Emulators: $host');
+  }
   runApp(const QuizMasterApp());
 }
 

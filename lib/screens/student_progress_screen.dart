@@ -11,27 +11,40 @@ class StudentProgressScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser!.uid;
+
     return Scaffold(
       appBar: AppBar(title: const Text('My Progress')),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: QuizService().attemptsFor(uid),
         builder: (context, snapshot) {
-          if (snapshot.hasError)
+          if (snapshot.hasError) {
             return const Center(child: Text('Could not load your progress.'));
-          if (!snapshot.hasData)
+          }
+
+          if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
-          final attempts = snapshot.data!.docs
-              .where((d) => d.data()['status'] == 'submitted')
+          }
+
+          final submitted = snapshot.data!.docs
+              .where((doc) => doc.data()['status'] == 'submitted')
               .toList();
-          final percentages = attempts
-              .map((d) => (d.data()['percentage'] as num?)?.toDouble() ?? 0)
+
+          final pendingAttempts = submitted
+              .where((doc) => doc.data()['manualReviewStatus'] == 'pending')
               .toList();
+
+          final completedAttempts = submitted
+              .where((doc) => doc.data()['manualReviewStatus'] != 'pending')
+              .toList();
+
+          final percentages = completedAttempts
+              .map((doc) => (doc.data()['percentage'] as num?)?.toDouble() ?? 0)
+              .toList();
+
           final average = percentages.isEmpty
               ? 0.0
               : percentages.reduce((a, b) => a + b) / percentages.length;
-          final best = percentages.isEmpty
-              ? 0.0
-              : percentages.reduce((a, b) => a > b ? a : b);
+
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -39,20 +52,20 @@ class StudentProgressScreen extends StatelessWidget {
                 children: [
                   _metric(
                     'Completed',
-                    '${attempts.length}',
+                    '${completedAttempts.length}',
                     Icons.task_alt_rounded,
+                  ),
+                  const SizedBox(width: 10),
+                  _metric(
+                    'Pending',
+                    '${pendingAttempts.length}',
+                    Icons.pending_actions_rounded,
                   ),
                   const SizedBox(width: 10),
                   _metric(
                     'Average',
                     '${average.toStringAsFixed(0)}%',
                     Icons.insights_rounded,
-                  ),
-                  const SizedBox(width: 10),
-                  _metric(
-                    'Best',
-                    '${best.toStringAsFixed(0)}%',
-                    Icons.emoji_events_rounded,
                   ),
                 ],
               ),
@@ -62,18 +75,27 @@ class StudentProgressScreen extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 10),
-              if (attempts.isEmpty)
+              if (submitted.isEmpty)
                 const Card(
                   child: Padding(
                     padding: EdgeInsets.all(24),
                     child: Text('Your completed quizzes will appear here.'),
                   ),
                 ),
-              ...attempts.map((doc) {
-                final d = doc.data();
-                final pct = ((d['percentage'] as num?)?.toDouble() ?? 0)
-                    .clamp(0, 100)
-                    .toDouble();
+              ...submitted.map((doc) {
+                final data = doc.data();
+                final isPending = data['manualReviewStatus'] == 'pending';
+
+                final percentage =
+                    ((data['percentage'] as num?)?.toDouble() ?? 0)
+                        .clamp(0, 100)
+                        .toDouble();
+
+                final rawFeedback = data['essayFeedback'];
+                final feedback = rawFeedback is Map
+                    ? Map<String, dynamic>.from(rawFeedback)
+                    : <String, dynamic>{};
+
                 return Card(
                   child: Padding(
                     padding: const EdgeInsets.all(14),
@@ -81,31 +103,94 @@ class StudentProgressScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          d['quizTitle']?.toString() ?? 'Quiz',
+                          data['quizTitle']?.toString() ?? 'Quiz',
                           style: const TextStyle(
                             fontWeight: FontWeight.w800,
                             color: qmNavy,
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                '${d['score'] ?? 0} / ${d['totalPoints'] ?? 0} points',
+                        if (isPending) ...[
+                          const Row(
+                            children: [
+                              Icon(
+                                Icons.pending_actions,
+                                color: Colors.orange,
+                                size: 19,
                               ),
-                            ),
-                            Text(
-                              '${pct.toStringAsFixed(0)}%',
-                              style: const TextStyle(
-                                color: qmBlue,
+                              SizedBox(width: 7),
+                              Expanded(
+                                child: Text(
+                                  'Awaiting teacher review',
+                                  style: TextStyle(
+                                    color: Colors.orange,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Your essay has been submitted. '
+                            'Your final score will appear here after grading.',
+                            style: TextStyle(fontSize: 13),
+                          ),
+                        ] else ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${data['score'] ?? 0} / '
+                                  '${data['totalPoints'] ?? 0} points',
+                                ),
+                              ),
+                              Text(
+                                '${percentage.toStringAsFixed(0)}%',
+                                style: const TextStyle(
+                                  color: qmBlue,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          LinearProgressIndicator(
+                            value: percentage / 100,
+                            minHeight: 7,
+                          ),
+                          if (data['manualReviewStatus'] == 'graded' &&
+                              feedback.isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            const Divider(),
+                            const Text(
+                              'Teacher Feedback',
+                              style: TextStyle(
                                 fontWeight: FontWeight.w800,
+                                color: qmNavy,
                               ),
                             ),
+                            const SizedBox(height: 8),
+                            ...feedback.entries
+                                .where(
+                                  (entry) =>
+                                      entry.value.toString().trim().isNotEmpty,
+                                )
+                                .toList()
+                                .asMap()
+                                .entries
+                                .map((entry) {
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: Text(
+                                      'Question ${entry.key + 1}: '
+                                      '${entry.value}',
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                  );
+                                }),
                           ],
-                        ),
-                        const SizedBox(height: 8),
-                        LinearProgressIndicator(value: pct / 100, minHeight: 7),
+                        ],
                       ],
                     ),
                   ),
@@ -114,7 +199,7 @@ class StudentProgressScreen extends StatelessWidget {
               const Padding(
                 padding: EdgeInsets.only(top: 12),
                 child: Text(
-                  'Progress reflects practice quiz submissions saved to your account.',
+                  'Your progress reflects quiz submissions saved to your account.',
                   style: TextStyle(color: Colors.grey, fontSize: 12),
                 ),
               ),

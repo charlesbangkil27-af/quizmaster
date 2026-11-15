@@ -12,6 +12,7 @@ class CreateClassScreen extends StatefulWidget {
 class _CreateClassScreenState extends State<CreateClassScreen> {
   final TextEditingController name = TextEditingController();
   final TextEditingController section = TextEditingController();
+  final TextEditingController maxStudents = TextEditingController(text: '40');
 
   bool busy = false;
 
@@ -19,13 +20,25 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
   void dispose() {
     name.dispose();
     section.dispose();
+    maxStudents.dispose();
     super.dispose();
   }
 
   Future<void> save() async {
+    final capacity = int.tryParse(maxStudents.text.trim());
+
     if (name.text.trim().isEmpty || section.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter class name and section.')),
+      );
+      return;
+    }
+
+    if (capacity == null || capacity < 1 || capacity > 500) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Maximum students must be between 1 and 500.'),
+        ),
       );
       return;
     }
@@ -36,6 +49,7 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
       final code = await ClassroomService().createClass(
         name.text.trim(),
         section.text.trim(),
+        maxStudents: capacity,
       );
 
       if (!mounted) return;
@@ -92,6 +106,16 @@ class _CreateClassScreenState extends State<CreateClassScreen> {
               controller: section,
               decoration: const InputDecoration(
                 labelText: 'Section (e.g. BSIT 2A)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: maxStudents,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Maximum students (1–500)',
+                helperText: 'Default: 40 students',
                 border: OutlineInputBorder(),
               ),
             ),

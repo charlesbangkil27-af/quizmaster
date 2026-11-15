@@ -19,6 +19,16 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   final code = TextEditingController();
   final svc = ClassroomService();
   bool joining = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    svc.ensureEnrollmentNames().catchError((Object error) {
+      debugPrint('Enrollment name backfill failed: $error');
+    });
+  }
+
   @override
   void dispose() {
     code.dispose();

@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import '../main.dart';
 import '../services/classroom_service.dart';
 import 'create_quiz_screen.dart';
+import 'ai_quiz_generator_screen.dart';
 import 'quiz_screen.dart';
 import 'leaderboard_screen.dart';
+import 'teacher_class_monitor_screen.dart';
 import '../services/notification_service.dart';
 
 class ClassDetailScreen extends StatelessWidget {
@@ -47,6 +49,20 @@ class ClassDetailScreen extends StatelessWidget {
             actions: [
               if (isTeacher)
                 IconButton(
+                  tooltip: 'Students and quiz submissions',
+                  icon: const Icon(Icons.groups_2_outlined),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => TeacherClassMonitorScreen(
+                        classId: classId,
+                        className: className,
+                      ),
+                    ),
+                  ),
+                ),
+              if (isTeacher)
+                IconButton(
                   tooltip: 'Post announcement',
                   icon: const Icon(Icons.campaign_outlined),
                   onPressed: () => _showAnnouncement(context, classId),
@@ -70,12 +86,7 @@ class ClassDetailScreen extends StatelessWidget {
               ? FloatingActionButton.extended(
                   backgroundColor: qmBlue,
                   foregroundColor: Colors.white,
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => CreateQuizScreen(classId: classId),
-                    ),
-                  ),
+                  onPressed: () => _showCreateQuizOptions(context),
                   icon: const Icon(Icons.quiz_rounded),
                   label: const Text('Create quiz'),
                 )
@@ -120,7 +131,7 @@ class ClassDetailScreen extends StatelessWidget {
               return ListView.separated(
                 padding: const EdgeInsets.all(16),
                 itemCount: snapshot.data!.docs.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
                   final doc = snapshot.data!.docs[index];
                   final data = doc.data();
@@ -165,75 +176,127 @@ class ClassDetailScreen extends StatelessWidget {
       },
     );
   }
-}
 
-Future<void> _showAnnouncement(BuildContext context, String classId) async {
-  final title = TextEditingController();
-  final message = TextEditingController();
-  final formKey = GlobalKey<FormState>();
-  final send = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text('Class announcement'),
-      content: Form(
-        key: formKey,
+  Future<void> _showAnnouncement(BuildContext context, String classId) async {
+    final title = TextEditingController();
+    final message = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final send = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Class announcement'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: title,
+                maxLength: 100,
+                decoration: const InputDecoration(labelText: 'Title'),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Enter a title.' : null,
+              ),
+              TextFormField(
+                controller: message,
+                maxLength: 1000,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'Message'),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Enter a message.' : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(dialogContext, true);
+              }
+            },
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+    if (send == true && context.mounted) {
+      try {
+        await NotificationService().createAnnouncement(
+          classId: classId,
+          title: title.text,
+          message: message.text,
+        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Announcement sent to your students.'),
+            ),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not send announcement: $e')),
+          );
+        }
+      }
+    }
+    title.dispose();
+    message.dispose();
+  }
+
+  Future<void> _showCreateQuizOptions(BuildContext context) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextFormField(
-              controller: title,
-              maxLength: 100,
-              decoration: const InputDecoration(labelText: 'Title'),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Enter a title.' : null,
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Choose how to create your quiz',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
             ),
-            TextFormField(
-              controller: message,
-              maxLength: 1000,
-              maxLines: 4,
-              decoration: const InputDecoration(labelText: 'Message'),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Enter a message.' : null,
+            ListTile(
+              leading: const Icon(Icons.edit_note_rounded),
+              title: const Text('Create manually'),
+              subtitle: const Text('Write your own questions and answers'),
+              onTap: () => Navigator.pop(sheetContext, 'manual'),
             ),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome),
+              title: const Text('Generate from document'),
+              subtitle: const Text('Select PDF, DOCX, PPTX, or TXT'),
+              onTap: () => Navigator.pop(sheetContext, 'document'),
+            ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext, false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () {
-            if (formKey.currentState!.validate()) {
-              Navigator.pop(dialogContext, true);
-            }
-          },
-          child: const Text('Send'),
-        ),
-      ],
-    ),
-  );
-  if (send == true && context.mounted) {
-    try {
-      await NotificationService().createAnnouncement(
-        classId: classId,
-        title: title.text,
-        message: message.text,
+    );
+
+    if (!context.mounted || choice == null) return;
+
+    if (choice == 'manual') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => CreateQuizScreen(classId: classId)),
       );
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Announcement sent to your students.')),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not send announcement: $e')),
-        );
-      }
+    } else if (choice == 'document') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AiQuizGeneratorScreen(classId: classId),
+        ),
+      );
     }
   }
-  title.dispose();
-  message.dispose();
 }

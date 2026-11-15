@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../main.dart';
+import 'essay_review_screen.dart';
 
 class TeacherDashboardScreen extends StatelessWidget {
   const TeacherDashboardScreen({super.key});
@@ -41,28 +42,29 @@ class TeacherDashboardScreen extends StatelessWidget {
                     StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                       stream: attempts,
                       builder: (context, a) {
-                     if ([c, s, q, a].any((x) => x.hasError)) {
-  return SingleChildScrollView(
-    padding: const EdgeInsets.all(16),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Dashboard Loading Errors',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (c.hasError) Text('Classes: ${c.error}'),
-        if (s.hasError) Text('Enrollments: ${s.error}'),
-        if (q.hasError) Text('Quizzes: ${q.error}'),
-        if (a.hasError) Text('Quiz Attempts: ${a.error}'),
-      ],
-    ),
-  );
-}
+                        if ([c, s, q, a].any((x) => x.hasError)) {
+                          return SingleChildScrollView(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Dashboard Loading Errors',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                if (c.hasError) Text('Classes: ${c.error}'),
+                                if (s.hasError) Text('Enrollments: ${s.error}'),
+                                if (q.hasError) Text('Quizzes: ${q.error}'),
+                                if (a.hasError)
+                                  Text('Quiz Attempts: ${a.error}'),
+                              ],
+                            ),
+                          );
+                        }
                         if ([c, s, q, a].any((x) => !x.hasData)) {
                           return const Center(
                             child: CircularProgressIndicator(),
@@ -71,7 +73,19 @@ class TeacherDashboardScreen extends StatelessWidget {
                         final submittedDocs = a.data!.docs
                             .where((d) => d.data()['status'] == 'submitted')
                             .toList();
-                        final scores = submittedDocs
+                        final pendingEssayDocs = submittedDocs
+                            .where(
+                              (d) =>
+                                  d.data()['manualReviewStatus'] == 'pending',
+                            )
+                            .toList();
+                        final scoredDocs = submittedDocs
+                            .where(
+                              (d) =>
+                                  d.data()['manualReviewStatus'] != 'pending',
+                            )
+                            .toList();
+                        final scores = scoredDocs
                             .map(
                               (d) =>
                                   (d.data()['percentage'] as num?)
@@ -117,6 +131,54 @@ class TeacherDashboardScreen extends StatelessWidget {
                                   'Submissions',
                                   '${submittedDocs.length}',
                                   Icons.assignment_turned_in_rounded,
+                                ),
+                                SizedBox(
+                                  width: 160,
+                                  child: Card(
+                                    clipBehavior: Clip.antiAlias,
+                                    child: InkWell(
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const EssayReviewScreen(),
+                                          ),
+                                        );
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            const Icon(
+                                              Icons.rate_review_rounded,
+                                              color: qmBlue,
+                                            ),
+                                            const SizedBox(height: 10),
+                                            Text(
+                                              '${pendingEssayDocs.length}',
+                                              style: const TextStyle(
+                                                fontSize: 25,
+                                                fontWeight: FontWeight.w800,
+                                                color: qmNavy,
+                                              ),
+                                            ),
+                                            const Text('Pending Essays'),
+                                            const SizedBox(height: 4),
+                                            const Text(
+                                              'Tap to review',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.grey,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
