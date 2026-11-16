@@ -5,7 +5,11 @@ import 'package:flutter/material.dart';
 import '../main.dart';
 import '../services/classroom_service.dart';
 import 'create_quiz_screen.dart';
+import 'ai_quiz_generator_screen.dart';
 import 'quiz_screen.dart';
+import 'leaderboard_screen.dart';
+import 'teacher_class_monitor_screen.dart';
+import '../services/notification_service.dart';
 
 class ClassDetailScreen extends StatelessWidget {
   const ClassDetailScreen({
@@ -25,10 +29,14 @@ class ClassDetailScreen extends StatelessWidget {
       future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
       builder: (context, profile) {
         if (profile.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
         if (profile.hasError || !profile.hasData || !profile.data!.exists) {
-          return const Scaffold(body: Center(child: Text('Could not load account profile.')));
+          return const Scaffold(
+            body: Center(child: Text('Could not load account profile.')),
+          );
         }
         final isTeacher = profile.data?.data()?['role'] == 'teacher';
         final quizzes = isTeacher
@@ -36,17 +44,49 @@ class ClassDetailScreen extends StatelessWidget {
             : service.studentQuizzesForClass(classId);
 
         return Scaffold(
-          appBar: AppBar(title: Text(className)),
+          appBar: AppBar(
+            title: Text(className),
+            actions: [
+              if (isTeacher)
+                IconButton(
+                  tooltip: 'Students and quiz submissions',
+                  icon: const Icon(Icons.groups_2_outlined),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => TeacherClassMonitorScreen(
+                        classId: classId,
+                        className: className,
+                      ),
+                    ),
+                  ),
+                ),
+              if (isTeacher)
+                IconButton(
+                  tooltip: 'Post announcement',
+                  icon: const Icon(Icons.campaign_outlined),
+                  onPressed: () => _showAnnouncement(context, classId),
+                ),
+              IconButton(
+                tooltip: 'Leaderboard',
+                icon: const Icon(Icons.emoji_events_outlined),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => LeaderboardScreen(
+                      classId: classId,
+                      className: className,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
           floatingActionButton: isTeacher
               ? FloatingActionButton.extended(
                   backgroundColor: qmBlue,
                   foregroundColor: Colors.white,
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => CreateQuizScreen(classId: classId),
-                    ),
-                  ),
+                  onPressed: () => _showCreateQuizOptions(context),
                   icon: const Icon(Icons.quiz_rounded),
                   label: const Text('Create quiz'),
                 )
@@ -55,7 +95,11 @@ class ClassDetailScreen extends StatelessWidget {
             stream: quizzes,
             builder: (context, snapshot) {
               if (snapshot.hasError) {
-                return const Center(child: Text('Could not load quizzes. Check your connection and Firestore rules.'));
+                return const Center(
+                  child: Text(
+                    'Could not load quizzes. Check your connection and Firestore rules.',
+                  ),
+                );
               }
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
@@ -67,9 +111,18 @@ class ClassDetailScreen extends StatelessWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.quiz_outlined, size: 48, color: qmBlue),
+                        const Icon(
+                          Icons.quiz_outlined,
+                          size: 48,
+                          color: qmBlue,
+                        ),
                         const SizedBox(height: 12),
-                        Text(isTeacher ? 'No quizzes created yet.' : 'No published quizzes yet.', textAlign: TextAlign.center),
+                        Text(
+                          isTeacher
+                              ? 'No quizzes created yet.'
+                              : 'No published quizzes yet.',
+                          textAlign: TextAlign.center,
+                        ),
                       ],
                     ),
                   ),
@@ -78,7 +131,7 @@ class ClassDetailScreen extends StatelessWidget {
               return ListView.separated(
                 padding: const EdgeInsets.all(16),
                 itemCount: snapshot.data!.docs.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
                   final doc = snapshot.data!.docs[index];
                   final data = doc.data();
@@ -88,20 +141,31 @@ class ClassDetailScreen extends StatelessWidget {
                         backgroundColor: Color(0xFFE9EDFF),
                         child: Icon(Icons.assignment_rounded, color: qmBlue),
                       ),
-                      title: Text(data['title']?.toString() ?? 'Quiz', style: const TextStyle(fontWeight: FontWeight.w700, color: qmNavy)),
+                      title: Text(
+                        data['title']?.toString() ?? 'Quiz',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: qmNavy,
+                        ),
+                      ),
                       subtitle: Text('${data['questionCount'] ?? 0} questions'),
-                      trailing: Icon(isTeacher ? Icons.chevron_right_rounded : Icons.play_circle_fill_rounded, color: qmBlue),
+                      trailing: Icon(
+                        isTeacher
+                            ? Icons.chevron_right_rounded
+                            : Icons.play_circle_fill_rounded,
+                        color: qmBlue,
+                      ),
                       onTap: isTeacher
                           ? null
                           : () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => QuizScreen(
-                                    quizId: doc.id,
-                                    title: data['title']?.toString() ?? 'Quiz',
-                                  ),
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => QuizScreen(
+                                  quizId: doc.id,
+                                  title: data['title']?.toString() ?? 'Quiz',
                                 ),
                               ),
+                            ),
                     ),
                   );
                 },
@@ -111,5 +175,128 @@ class ClassDetailScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _showAnnouncement(BuildContext context, String classId) async {
+    final title = TextEditingController();
+    final message = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final send = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Class announcement'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: title,
+                maxLength: 100,
+                decoration: const InputDecoration(labelText: 'Title'),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Enter a title.' : null,
+              ),
+              TextFormField(
+                controller: message,
+                maxLength: 1000,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'Message'),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Enter a message.' : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(dialogContext, true);
+              }
+            },
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+    if (send == true && context.mounted) {
+      try {
+        await NotificationService().createAnnouncement(
+          classId: classId,
+          title: title.text,
+          message: message.text,
+        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Announcement sent to your students.'),
+            ),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not send announcement: $e')),
+          );
+        }
+      }
+    }
+    title.dispose();
+    message.dispose();
+  }
+
+  Future<void> _showCreateQuizOptions(BuildContext context) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Choose how to create your quiz',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_note_rounded),
+              title: const Text('Create manually'),
+              subtitle: const Text('Write your own questions and answers'),
+              onTap: () => Navigator.pop(sheetContext, 'manual'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome),
+              title: const Text('Generate from document'),
+              subtitle: const Text('Select PDF, DOCX, PPTX, or TXT'),
+              onTap: () => Navigator.pop(sheetContext, 'document'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (!context.mounted || choice == null) return;
+
+    if (choice == 'manual') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => CreateQuizScreen(classId: classId)),
+      );
+    } else if (choice == 'document') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AiQuizGeneratorScreen(classId: classId),
+        ),
+      );
+    }
   }
 }

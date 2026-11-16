@@ -22,3 +22,11 @@ functions/*.log
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated Flutter files
+**/Flutter/ephemeral/
+**/Flutter/Generated.xcconfig
+**/Flutter/flutter_export_environment.sh
+
+# Nested duplicate project
+/quizmaster/
