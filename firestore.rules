@@ -45,18 +45,67 @@ service cloud.firestore {
 
     match /classes/{classId} {
       allow read: if signedIn()
-        && (resource.data.teacherId == request.auth.uid || enrolled(classId));
+        && (
+          resource.data.teacherId == request.auth.uid
+          || enrolled(classId)
+          || (
+            activeStudent()
+            && resource.data.isActive == true
+            && get(
+              /databases/$(database)/documents/classCodes/$(resource.data.joinCode)
+            ).data.classId == classId
+            && get(
+              /databases/$(database)/documents/classCodes/$(resource.data.joinCode)
+            ).data.isActive == true
+          )
+        );
+
       allow create: if activeTeacher()
         && request.resource.data.teacherId == request.auth.uid
         && request.resource.data.name is string
         && request.resource.data.section is string
         && request.resource.data.joinCode is string
         && request.resource.data.joinCode.matches('^[A-HJ-NP-Z2-9]{6}$')
-        && request.resource.data.isActive == true;
-      allow update: if activeTeacher()
+        && request.resource.data.isActive == true
+        && request.resource.data.maxStudents is int
+        && request.resource.data.maxStudents >= 1
+        && request.resource.data.maxStudents <= 500
+        && request.resource.data.enrolledCount is int
+        && request.resource.data.enrolledCount == 0;
+
+      allow update: if (
+        activeTeacher()
         && resource.data.teacherId == request.auth.uid
-        && request.resource.data.teacherId == resource.data.teacherId;
-      allow delete: if activeTeacher() && resource.data.teacherId == request.auth.uid;
+        && request.resource.data.teacherId == resource.data.teacherId
+      ) || (
+        activeStudent()
+        && resource.data.isActive == true
+        && resource.data.maxStudents is int
+        && resource.data.enrolledCount is int
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['enrolledCount'])
+        && request.resource.data.enrolledCount is int
+        && request.resource.data.enrolledCount == resource.data.enrolledCount + 1
+        && request.resource.data.enrolledCount <= resource.data.maxStudents
+        && existsAfter(
+          /databases/$(database)/documents/enrollments/$(classId + '_' + request.auth.uid)
+        )
+        && getAfter(
+          /databases/$(database)/documents/enrollments/$(classId + '_' + request.auth.uid)
+        ).data.studentId == request.auth.uid
+        && getAfter(
+          /databases/$(database)/documents/enrollments/$(classId + '_' + request.auth.uid)
+        ).data.classId == classId
+        && getAfter(
+          /databases/$(database)/documents/enrollments/$(classId + '_' + request.auth.uid)
+        ).data.teacherId == resource.data.teacherId
+        && getAfter(
+          /databases/$(database)/documents/enrollments/$(classId + '_' + request.auth.uid)
+        ).data.joinCode == resource.data.joinCode
+      );
+
+      allow delete: if activeTeacher()
+        && resource.data.teacherId == request.auth.uid;
     }
 
    
@@ -96,8 +145,40 @@ allow list: if signedIn() && (
         && exists(/databases/$(database)/documents/classes/$(request.resource.data.classId))
         && get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.isActive == true
         && get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.joinCode == request.resource.data.joinCode
-        && get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.teacherId == request.resource.data.teacherId;
-      allow update, delete: if false;
+        && get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.teacherId == request.resource.data.teacherId
+        && (
+          !('maxStudents' in get(
+            /databases/$(database)/documents/classes/$(request.resource.data.classId)
+          ).data)
+          || (
+            get(
+              /databases/$(database)/documents/classes/$(request.resource.data.classId)
+            ).data.maxStudents is int
+            && get(
+              /databases/$(database)/documents/classes/$(request.resource.data.classId)
+            ).data.enrolledCount is int
+            && getAfter(
+              /databases/$(database)/documents/classes/$(request.resource.data.classId)
+            ).data.enrolledCount
+              == get(
+                /databases/$(database)/documents/classes/$(request.resource.data.classId)
+              ).data.enrolledCount + 1
+            && getAfter(
+              /databases/$(database)/documents/classes/$(request.resource.data.classId)
+            ).data.enrolledCount
+              <= getAfter(
+                /databases/$(database)/documents/classes/$(request.resource.data.classId)
+              ).data.maxStudents
+          )
+        );
+      allow update: if activeStudent()
+        && resource.data.studentId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['studentName'])
+        && request.resource.data.studentName is string
+        && request.resource.data.studentName.size() > 0
+        && request.resource.data.studentName == userProfile().displayName;
+
+      allow delete: if false;
     }
 
     match /quizzes/{quizId} {
@@ -147,16 +228,103 @@ allow list: if signedIn() && (
     match /quizAttempts/{attemptId} {
       allow read: if signedIn()
         && (resource.data.uid == request.auth.uid
-          || (activeTeacher() && ownsClass(resource.data.classId)));
+          || attemptId.matches('^' + request.auth.uid + '_.*')
+          || (activeTeacher() && (resource.data.teacherId == request.auth.uid
+            || ownsClass(resource.data.classId))));
+
       allow create: if activeStudent()
+        && attemptId == request.auth.uid + '_' + request.resource.data.quizId
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'inProgress'
+        && request.resource.data.teacherId is string
+        && request.resource.data.teacherId == get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.teacherId
         && enrolled(request.resource.data.classId);
-      allow update: if activeStudent()
+
+      allow update: if (
+        activeStudent()
         && resource.data.uid == request.auth.uid
         && resource.data.status == 'inProgress'
         && request.resource.data.status == 'submitted'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'answers', 'score', 'totalPoints', 'percentage', 'submittedAt', 'wasLate']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'answers', 'score', 'totalPoints',
+          'percentage', 'submittedAt', 'wasLate',
+          'manualReviewStatus'
+        ])
+        && (
+          !('manualReviewStatus' in request.resource.data)
+          || (
+            request.resource.data.manualReviewStatus == 'pending'
+            && get(/databases/$(database)/documents/quizzes/$(resource.data.quizId)).data.quizType == 'essay'
+          )
+        )
+      ) || (
+        activeTeacher()
+        && ownsClass(resource.data.classId)
+        && resource.data.teacherId == request.auth.uid
+        && resource.data.status == 'submitted'
+        && resource.data.manualReviewStatus == 'pending'
+        && get(/databases/$(database)/documents/quizzes/$(resource.data.quizId)).data.quizType == 'essay'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'score', 'totalPoints', 'percentage',
+          'essayScores', 'essayFeedback',
+          'manualReviewStatus', 'gradedBy', 'gradedAt'
+        ])
+        && request.resource.data.manualReviewStatus == 'graded'
+        && request.resource.data.gradedBy == request.auth.uid
+        && request.resource.data.score is number
+        && request.resource.data.score >= 0
+        && request.resource.data.score <= request.resource.data.totalPoints
+        && request.resource.data.totalPoints == resource.data.totalPoints
+        && request.resource.data.percentage is number
+        && request.resource.data.percentage >= 0
+        && request.resource.data.percentage <= 100
+        && request.resource.data.essayScores is map
+        && request.resource.data.essayFeedback is map
+        && request.resource.data.gradedAt is timestamp
+      );
+
+      allow delete: if false;
+    }
+    match /notifications/{notificationId} {
+      allow get, list: if signedIn()
+        && resource.data.recipientId == request.auth.uid;
+
+      allow create: if signedIn() && (
+        (activeTeacher()
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.type in ['quiz', 'announcement']
+          && request.resource.data.classId is string
+          && ownsClass(request.resource.data.classId)
+          && exists(/databases/$(database)/documents/enrollments/$(request.resource.data.classId + '_' + request.resource.data.recipientId)))
+        ||
+        (activeStudent()
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.studentId == request.auth.uid
+          && request.resource.data.type == 'student_joined'
+          && request.resource.data.classId is string
+          && enrolled(request.resource.data.classId)
+          && get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.teacherId
+            == request.resource.data.recipientId)
+      );
+
+      allow update: if signedIn()
+        && resource.data.recipientId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead'])
+        && request.resource.data.isRead is bool;
+      allow delete: if false;
+    }
+
+    match /leaderboards/{classId}/entries/{studentId} {
+      allow get, list: if signedIn()
+        && (enrolled(classId) || ownsClass(classId));
+      // Practice rankings are client-calculated and are not suitable for official grading.
+      allow create, update: if activeStudent()
+        && studentId == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && enrolled(classId)
+        && request.resource.data.averagePercentage is number
+        && request.resource.data.averagePercentage >= 0
+        && request.resource.data.averagePercentage <= 100;
       allow delete: if false;
     }
   }

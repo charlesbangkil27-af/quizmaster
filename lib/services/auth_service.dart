@@ -42,10 +42,7 @@ class AuthService {
   }
 
   Future<void> login({required String email, required String password}) =>
-      _auth.signInWithEmailAndPassword(
-        email: email.trim(),
-        password: password,
-      );
+      _auth.signInWithEmailAndPassword(email: email.trim(), password: password);
 
   Future<void> logout() => _auth.signOut();
 }
